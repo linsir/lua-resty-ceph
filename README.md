@@ -22,7 +22,7 @@ More:
 ## Synopsis
 
 ``` lua
-lua_package_path "/path/to/lua-resty-http/lib/?.lua;;";
+lua_package_path "/path/to/lua-resty-ceph/lib/?.lua;;";
 
 server {
   location  /swift {

@@ -10,12 +10,6 @@ local os = require "os"
 -- local http = require"resty.http"
 -- local hmac = require "resty.hmac"
 
-config = {
-    host = 'http://192.168.2.99',
-    access_key = 'HXKJ2FLL7BAWENBMP0HF',
-    secret_key = 'DEeFyCPlBKK2vS7DPJDeeozNiF5WAjL7pVMNpDlO',
-
-}
 
 local ok, new_tab = pcall(require, "table.new")
 if not ok then
