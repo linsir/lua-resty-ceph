@@ -1,30 +1,27 @@
 -- A simple Lua wrapper for ceph with s3.
+-- more: http://docs.ceph.org.cn/radosgw/s3/
 -- @Date    : 2016-05-31 16:35:41
 -- @Author  : Linsir (root@linsir.org)
 -- @Link    : http://linsir.org
--- @Version :
-
+-- @Version : 0.02
 
 local cjson = require "cjson"
 local os = require "os"
--- local http = require"resty.http"
+local http = require"resty.http"
 -- local hmac = require "resty.hmac"
-
 
 local ok, new_tab = pcall(require, "table.new")
 if not ok then
     new_tab = function (narr, nrec) return {} end
 end
 
-
 local _M = new_tab(0, 155)
-_M._VERSION = '0.01'
-
+_M._VERSION = '0.02'
 
 local mt = { __index = _M }
 
-function _M.new(self, id, key)
-    local id, key = id, key
+function _M.new(self, id, key, host)
+    local id, key, host = id, key, host
 
     if not id then
         return nil, "must provide id"
@@ -32,18 +29,21 @@ function _M.new(self, id, key)
     if not key then
         return nil, "must provide key"
     end
-    local url = "/proxy"
-    local res = ngx.location.capture("/proxy/",
-            { method = ngx.HTTP_GET,
-            })
-    -- ngx.log(ngx.ERR, "connect to ceph gateway： ", res.status)
+    if not host then
+        return nil, "can not find ceph host"
+    end
+    local httpc = http.new()
+    httpc:set_timeout(500)
+    local res, err = httpc:request_uri(host, {
+        method  = "GET"
+    })
     if res.status == 504 then
         ngx.status = 504
         ngx.header["Content-Type"] = "text/plain"
         ngx.say("Opps, can not connect to ceph gateway.")
         ngx.exit(504)
     end
-    return setmetatable({ id = id, key = key, base_url = url }, mt)
+    return setmetatable({ id = id, key = key, base_url = host }, mt)
 end
 
 function _M.generate_auth_headers(self, method, destination, content_type)
@@ -67,89 +67,204 @@ function _M.generate_auth_headers(self, method, destination, content_type)
     -- signed = headerstr["auth"]
 
     headers = {}
-    headers['auth'] = signed
+    headers['Authorization'] = signed
     headers['Content-Type'] = content_type
-    headers['date'] = timestamp
-
-    -- ngx.say(cjson.encode(headers))
+    headers['Date'] = timestamp
 
     return headers
 end
 
+-- BUCKET OPERATIONS 
+
 function _M.get_all_buckets(self)
     local destination = "/"
     local url = self.base_url .. destination
-    -- local url = "http://httpbin.org/get"
-    headers = self:generate_auth_headers("GET", destination)
-    -- ngx.say(headers)
-    local retry = 0
-    while (not res or res.status ~= 200) and retry < 2 do
-        res = ngx.location.capture(url,
-            { method = ngx.HTTP_GET,
-              -- body = content,
-              args = {date=headers.date, auth=headers.auth, file=destination}}
-        )
-        retry = retry + 1
-    end
+    local headers_t = self:generate_auth_headers("GET", destination)
+
+    local httpc = http.new()
+    local res, err = httpc:request_uri(url, {
+                method  = "GET",
+                -- body = content,
+                headers = headers_t
+            })
     if not res then
-      ngx.log(ngx.ERR, "failed to get_all_objs: ", destination, ": ", err)
+      ngx.log(ngx.ERR, "failed to get_all_buckets: ", destination, ": ", err)
       return
     end
 
-    ngx.header["Content-Type"] = "application/xml; charset=UTF-8"
-    ngx.say(res.body)
+    -- ngx.header["Content-Type"] = "application/xml; charset=UTF-8"
+    -- ngx.log(ngx.INFO, "get_all_buckets: ", res.body)
     return res.body
 end
-function _M.get_all_objs(self, bucket)
 
+function _M.create_bucket(self, bucket, acl)
     local destination = "/" .. bucket
     local url = self.base_url .. destination
-    -- local url = "http://httpbin.org/get"
-    headers = self:generate_auth_headers("GET", destination)
-    local res = ngx.location.capture(url,
-            { method = ngx.HTTP_GET,
-              -- body = content,
-              args = {date=headers.date, auth=headers.auth, file=destination}}
-        )
+    local headers_t = self:generate_auth_headers("PUT", destination)
+    if acl == nil then
+        acl = 'public-read'
+    end
+
+    headers_t['x-amz-acl'] = acl
+
+    local httpc = http.new()
+    local res, err = httpc:request_uri(url, {
+                method  = "PUT",
+                -- body = content,
+                headers = headers_t
+            })
+    if not res then
+      ngx.log(ngx.ERR, "failed to create_bucket: ", destination, ": ", err)
+      return
+    end
+    return "Create bucket Sucess."
+
+
+end
+
+function _M.del_bucket(self, bucket)
+    local destination = "/" .. bucket
+    local url = self.base_url .. destination
+    local headers_t = self:generate_auth_headers("DELETE", destination)
+    
+    local httpc = http.new()
+    local res, err = httpc:request_uri(url, {
+                method  = "DELETE",
+                -- body = content,
+                headers = headers_t
+            })
+    if not res then
+      ngx.log(ngx.ERR, "failed to del_bucket: ", destination, ": ", err)
+      return
+    end
+    if res.status ==204 then
+        ngx.status = 204
+        ngx.header["Content-Type"] = "text/plain"
+        ngx.say(res.body)
+    end
+
+    if res.status == 404 then
+        ngx.status = 404
+        ngx.header["Content-Type"] = "text/plain"
+        ngx.say("Opps, bucket not found.")
+        ngx.exit(404)
+    end
+    
+end
+
+function _M.get_all_objs(self, bucket, args)
+    local destination = "/" .. bucket
+    local url = self.base_url .. destination
+    -- local headers_t = self:generate_auth_headers("GET", destination)
+
+    local httpc = http.new()
+    local res, err = httpc:request_uri(url, {
+                method  = "GET",
+                body = args,
+                headers = headers_t
+            })
     if not res then
       ngx.log(ngx.ERR, "failed to get_all_objs: ", destination, ": ", err)
       return
     end
 
-    ngx.header["Content-Type"] = "application/xml; charset=UTF-8"
-    ngx.say(res.body)
+    -- ngx.header["Content-Type"] = "application/xml; charset=UTF-8"
+    -- ngx.log(ngx.INFO, "get_all_objs: ", res.body)
     return res.body
 
 end
+
+function _M.get_buckets_location(self, bucket)
+    local destination = "/" .. bucket .. "?location"
+    local url = self.base_url .. destination
+    local headers_t = self:generate_auth_headers("GET", destination)
+
+    local httpc = http.new()
+    local res, err = httpc:request_uri(url, {
+                method  = "GET",
+                -- body = content,
+                headers = headers_t
+            })
+    if not res then
+      ngx.log(ngx.ERR, "failed to get_all_buckets: ", destination, ": ", err)
+      return
+    end
+    return res.body
+end
+
+function _M.get_buckets_acl(self, bucket)
+    local destination = "/" .. bucket .. "?acl"
+    local url = self.base_url .. destination
+    local headers_t = self:generate_auth_headers("GET", destination)
+
+    local httpc = http.new()
+    local res, err = httpc:request_uri(url, {
+                method  = "GET",
+                -- body = content,
+                headers = headers_t
+            })
+    if not res then
+      ngx.log(ngx.ERR, "failed to get_all_buckets: ", destination, ": ", err)
+      return
+    end
+    return res.body
+end
+
+-- TODO: upload
+
+-- OBJECT OPERATIONS
+
 function _M.create_obj(self, bucket, file, content)
     local destination = "/" .. bucket .. "/" .. file
     local url = self.base_url .. destination
-    -- ngx.say(url)
-    -- local url ="http://httpbin.org/put"
-    headers = self:generate_auth_headers("PUT", destination)
-    local res = ngx.location.capture(url,
-            { method = ngx.HTTP_PUT,
-              body = content,
-              args = {date=headers.date, auth=headers.auth, file=destination}}
-        )
+    local headers_t = self:generate_auth_headers("PUT", destination)
+
+    local httpc = http.new()
+    local res, err = httpc:request_uri(url, {
+                method  = "PUT",
+                body = content,
+                headers = headers_t
+            })
     if not res then
       ngx.log(ngx.ERR, "failed to create_obj: ", destination, ": ", err)
       return
     end
-    -- ngx.say(res.body)
     return ngx.var.host .. destination
+end
+
+function _M.del_obj(self, bucket, file)
+    local destination = "/" .. bucket .. "/" .. file
+    local url = self.base_url .. destination
+    local headers_t = self:generate_auth_headers("DELETE", destination)
+    local httpc = http.new()
+    local res, err = httpc:request_uri(url, {
+                method  = "DELETE",
+                -- body = content,
+                headers = headers_t
+            })
+    if not res then
+      ngx.log(ngx.ERR, "failed to del_obj: ", destination, ": ", err)
+      return
+    end
+
+    if res.status ==204 then
+        ngx.status = 204
+        ngx.header["Content-Type"] = "text/plain"
+        ngx.say(res.body)
+    end
 end
 
 function _M.get_obj(self, bucket, file)
     local destination = "/" .. bucket .. "/" .. file
     local url = self.base_url .. destination
-    headers = self:generate_auth_headers("GET", destination)
+    local headers_t = self:generate_auth_headers("GET", destination)
 
-    local res = ngx.location.capture(url,
-            { method = ngx.HTTP_GET,
-              body = content,
-              args = {date=headers.date, auth=headers.auth, file=destination}}
-        )
+    local httpc = http.new()
+    local res, err = httpc:request_uri(url, {
+                method  = "GET",
+                -- body = content,
+                headers = headers_t
+            })
     if not res then
       ngx.log(ngx.ERR, "failed to get_obj: ", destination, ": ", err)
       return
@@ -166,13 +281,14 @@ end
 function _M.check_for_existance(self, bucket, file)
     local destination = "/" .. bucket .. "/" .. file
     local url = self.base_url .. destination
-    headers = self:generate_auth_headers("HEAD", destination)
+    local headers_t = self:generate_auth_headers("HEAD", destination)
 
-    local res = ngx.location.capture(url,
-            { method = ngx.HTTP_HEAD,
-              body = content,
-              args = {date=headers.date, auth=headers.auth, file=destination}}
-        )
+    local httpc = http.new()
+    local res, err = httpc:request_uri(url, {
+                method  = "HEAD",
+                -- body = content,
+                headers = headers_t
+            })
     if not res then
       ngx.log(ngx.ERR, "failed to check_for_existance: ", destination, ": ", err)
       return false
@@ -185,63 +301,43 @@ function _M.check_for_existance(self, bucket, file)
     end
 end
 
-function _M.del_obj(self, bucket, file)
-    local destination = "/" .. bucket .. "/" .. file
+
+function _M.get_obj_acl(self, bucket, file)
+    local destination = "/" .. bucket .. "/" .. file .. "?acl"
     local url = self.base_url .. destination
-    headers = self:generate_auth_headers("DELETE", destination)
-    local res = ngx.location.capture(url,
-            { method = ngx.HTTP_DELETE,
-              body = content,
-              args = {date=headers.date, auth=headers.auth, file=destination}}
-        )
+    local headers_t = self:generate_auth_headers("GET", destination)
+
+    local httpc = http.new()
+    local res, err = httpc:request_uri(url, {
+                method  = "GET",
+                -- body = content,
+                headers = headers_t
+            })
     if not res then
-      ngx.log(ngx.ERR, "failed to del_obj: ", destination, ": ", err)
+      ngx.log(ngx.ERR, "failed to get_obj_acl: ", destination, ": ", err)
       return
     end
-
-    return "Delete Sucess."
+    return res.body
 end
 
-function _M.create_bucket(self, bucket)
-    local destination = "/" .. bucket
+function _M.set_obj_acl(self, bucket, file, args)
+    local destination = "/" .. bucket .. "/" .. file .. "?acl"
     local url = self.base_url .. destination
-    -- local url = "http://httpbin.org/put"
-    headers = self:generate_auth_headers("PUT", destination)
-    -- headers['x-amz-acl'] = 'public-read'
-    local res = ngx.location.capture(url,
-            { method = ngx.HTTP_PUT,
-              body = content,
-              args = {date=headers.date, auth=headers.auth, file=destination}}
-        )
+    local headers_t = self:generate_auth_headers("PUT", destination)
+
+    local httpc = http.new()
+    local res, err = httpc:request_uri(url, {
+                method  = "PUT",
+                body = args,
+                headers = headers_t
+            })
     if not res then
-      ngx.log(ngx.ERR, "failed to create_bucket: ", destination, ": ", err)
+      ngx.log(ngx.ERR, "failed to get_obj_acl: ", destination, ": ", err)
       return
     end
-    return "Create bucket Sucess."
-
-
+    return res.body
 end
 
-function _M.del_bucket(self, bucket)
-    local destination = "/" .. bucket
-    local url = self.base_url .. destination
-    headers = self:generate_auth_headers("DELETE", destination)
-    local res = ngx.location.capture(url,
-            { method = ngx.HTTP_DELETE,
-              body = content,
-              args = {date=headers.date, auth=headers.auth, file=destination}}
-        )
-    if not res then
-      ngx.log(ngx.ERR, "failed to del_bucket: ", destination, ": ", err)
-      return
-    end
-    if res.status == 404 then
-        ngx.status = 404
-        ngx.header["Content-Type"] = "text/plain"
-        ngx.say("Opps, bucket not found.")
-        ngx.exit(404)
-    end
-    return "Delete Sucess."
-end
+-- TODO: UPLOAD OPS
 
 return _M

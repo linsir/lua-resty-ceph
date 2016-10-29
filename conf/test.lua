@@ -1,11 +1,16 @@
+
+config = {
+    timeout = 300, -- * 24 * 3600 -- redis timeout (sec)
+    ceph_mode = true,
+    host = 'http://httpbin.org',
+    access_key = 'HXKJ2FLL7BAWENBMP0HF',
+    secret_key = 'DEeFyCPlBKK2vS7DPJDeeozNiF5WAjL7pVMNpDlO',
+    auth_uri = 'http://192.168.2.99/auth',
+    swift_user = 'demouserid:swift',
+    swift_secret_key  = 'QG1GXO1ZeKr62sUeCLkKge6SKRhpNNoBETqyhetG',
+
+}
 local _M = {}
-
-
-
-function _M.go()
-    local main = require "main"
-    main.run()
-end
 
 function _M.swiftrun()
 
@@ -42,8 +47,8 @@ function _M.s3run()
     del = ngx.var.arg_d
     create = ngx.var.arg_cr
 
-    local cephs3 = require("cephs3")
-    local app = cephs3:new(config.access_key, config.secret_key)
+    local cephs3 = require("resty.cephs3")
+    local app = cephs3:new(config.access_key, config.secret_key, config.host)
 
     if (bucket and create ) then
         local data = app:create_bucket(bucket)
