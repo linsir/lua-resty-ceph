@@ -1,6 +1,6 @@
 # lua-resty-ceph
 
-A simple Lua wrapper for ceph with s3 and swift based on OpenResty.
+A simple Lua wrapper for ceph with swift based on OpenResty.
 
 More: 
 
@@ -33,7 +33,7 @@ More:
 
 ## new
 
-    local app = cephs3:new(access_key, secret_key, host)
+    local app = cephs3:new(access_key, secret_key, auth_uri)
 
 ## get_all_buckets
 
@@ -47,49 +47,29 @@ More:
 
     app:del_bucket(bucket)
 
-## get_all_buckets
-
-    app:get_all_buckets()
-
 ## get_all_objs
 
     app:get_all_objs(bucket)
 
-## get_buckets_location
+## set_bucket_acl
 
-    app:get_buckets_location(bucket)
-
-## get_buckets_acl(bucket)
-
-    app:get_buckets_acl(bucket)
+    app:set_bucket_acl(bucket)
 
 ## create_obj
 
     app:create_obj(bucket, file, content)
 
-## del_obj
-
-    app:del_obj(bucket, file)
-
 ## get_obj
 
     app:get_obj(bucket, file)
 
-## check_for_existance
+## del_obj
 
-    app:check_for_existance(bucket, file)
+    app:del_obj(bucket, file)
 
-## get_obj_acl
-
-    app:get_obj_acl(bucket, file)
-
-## set_obj_acl
-
-    app:set_obj_acl(bucket, file)
 
 # TODO
 
-* Some no required request headers for API.
 * Upload operations.
 
 # Author
