@@ -28,6 +28,35 @@ More:
 
 ## Synopsis
 
+``` lua
+function swiftrun()
+
+    bucket = ngx.var.arg_b
+    file = ngx.var.arg_f
+    content = ngx.var.arg_c
+    del = ngx.var.arg_d
+    local cephswift = require("resty.cephswift")
+    app = cephswift:new(config.swift_user, config.swift_secret_key, config.auth_uri)
+    -- app:create_bucket(bucket)
+    -- app:get_all_objs(bucket)
+    if content then
+        local url = app:create_obj(bucket, file, content)
+        ngx.say(url)
+    end
+
+    if file then
+        local data = app:get_obj(bucket, file)
+        ngx.say(data)
+        -- app:del_obj(bucket, file)
+    end
+
+    if del == "y" then
+        local res = app:del_bucket(bucket)
+
+    end
+end
+
+```
 
 # Usage
 

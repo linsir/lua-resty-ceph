@@ -1,8 +1,8 @@
-
+-- tests
 config = {
     timeout = 300, -- * 24 * 3600 -- redis timeout (sec)
     ceph_mode = true,
-    host = 'http://httpbin.org',
+    host = 'http://httpbin.org', -- s3 api host
     access_key = 'HXKJ2FLL7BAWENBMP0HF',
     secret_key = 'DEeFyCPlBKK2vS7DPJDeeozNiF5WAjL7pVMNpDlO',
     auth_uri = 'http://192.168.2.99/auth',
@@ -18,8 +18,8 @@ function _M.swiftrun()
     file = ngx.var.arg_f
     content = ngx.var.arg_c
     del = ngx.var.arg_d
-
-    app = cephswift:new(config.swift_user, config.swift_secret_key)
+    local cephswift = require("resty.cephswift")
+    app = cephswift:new(config.swift_user, config.swift_secret_key, config.auth_uri)
     -- app:create_bucket(bucket)
     -- app:get_all_objs(bucket)
     if content then

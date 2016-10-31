@@ -28,6 +28,15 @@ More:
 
 ## Synopsis
 
+``` lua
+local cephs3 = require("resty.cephs3")
+local app = cephs3:new(config.access_key, config.secret_key, config.host)
+
+local data = app:create_bucket(bucket)
+ngx.say(data)
+app:get_all_objs(bucket)
+    
+```
 
 # Usage
 
