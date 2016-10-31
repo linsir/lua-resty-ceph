@@ -3,7 +3,7 @@
 -- @Date    : 2016-05-31 16:35:41
 -- @Author  : Linsir (root@linsir.org)
 -- @Link    : http://linsir.org
--- @Version : 0.02
+-- @Version : 0.0.2
 
 local cjson = require "cjson"
 local os = require "os"
@@ -16,7 +16,7 @@ if not ok then
 end
 
 local _M = new_tab(0, 155)
-_M._VERSION = '0.02'
+_M._VERSION = '0.0.2'
 
 local mt = { __index = _M }
 
