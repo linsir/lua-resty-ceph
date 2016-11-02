@@ -58,6 +58,7 @@ def restart():
     print(green("nginx restarting..."))
     local('sudo systemctl restart nginx')
     local('curl http://127.0.0.1:8000/s3')
+    # local('curl http://127.0.0.1:8000/s3?cr=y&b=haha')
 
 def update():
     # local update

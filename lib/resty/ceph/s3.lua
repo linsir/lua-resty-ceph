@@ -3,12 +3,12 @@
 -- @Date    : 2016-05-31 16:35:41
 -- @Author  : Linsir (root@linsir.org)
 -- @Link    : http://linsir.org
--- @Version : 0.0.2
+-- @Version : 0.0.3
 
 local cjson = require "cjson"
 local os = require "os"
 local http = require"resty.http"
--- local hmac = require "resty.hmac"
+local utils = require "resty.ceph.utils"
 
 local ok, new_tab = pcall(require, "table.new")
 if not ok then
@@ -16,7 +16,7 @@ if not ok then
 end
 
 local _M = new_tab(0, 155)
-_M._VERSION = '0.0.2'
+_M._VERSION = '0.0.3'
 
 local mt = { __index = _M }
 
@@ -46,31 +46,41 @@ function _M.new(self, id, key, host)
     return setmetatable({ id = id, key = key, base_url = host }, mt)
 end
 
-function _M.generate_auth_headers(self, method, destination, content_type)
-
+function _M.generate_auth_headers(self, method, destination, req_headers)
+    local headers = {}
+    headers['content-type'] = ''
     if not self.id or not self.key then
         return nil, "not initialized"
     end
 
-    if content_type == nil then
-        content_type = ''
+    if req_headers then
+        for k, v in pairs(req_headers) do
+            if utils.lower(k) == 'content-type' then
+                headers['content-type'] = utils.lower(v) or ''
+            end
+            if utils.lower(k) == 'content-md5' then
+                headers['content-md5'] = utils.lower(v) or ''
+            end
+            if utils.startswith(utils.lower(k), 'x-amz') then
+                headers[utils.lower(k)] = utils.lower(v)
+            end
+        end
+    end
+
+    local h_str = ''
+    for k, v in pairs(headers) do
+        h_str = v..string.char(10)
     end
 
     local timestamp = os.date("!%a, %d %b %Y %H:%M:%S +0000")
 
-    local StringToSign = method..string.char(10)..string.char(10)..content_type..string.char(10)..timestamp..string.char(10)..destination
+    local StringToSign = method..string.char(10)..string.char(10)..h_str..timestamp..string.char(10)..destination
     local signed = ngx.encode_base64(ngx.hmac_sha1(self.key, StringToSign))
     signed = 'AWS' .. ' ' .. self.id .. ':' .. signed
 
-    -- local hm, err = hmac:new(self.key)
-    -- headerstr, err = hm:generate_headers("AWS", self.id, "sha1", StringToSign)
-    -- signed = headerstr["auth"]
-
-    headers = {}
     headers['Authorization'] = signed
-    headers['Content-Type'] = content_type
     headers['Date'] = timestamp
-
+    -- ngx.log(ngx.INFO, cjson.encode(headers))
     return headers
 end
 
@@ -79,7 +89,8 @@ end
 function _M.get_all_buckets(self)
     local destination = "/"
     local url = self.base_url .. destination
-    local headers_t = self:generate_auth_headers("GET", destination)
+    local req_headers = ngx.req.get_headers()
+    local headers_t = self:generate_auth_headers("GET", destination, req_headers)
 
     local httpc = http.new()
     local res, err = httpc:request_uri(url, {
@@ -100,12 +111,12 @@ end
 function _M.create_bucket(self, bucket, acl)
     local destination = "/" .. bucket
     local url = self.base_url .. destination
-    local headers_t = self:generate_auth_headers("PUT", destination)
+    local req_headers = ngx.req.get_headers()
     if acl == nil then
         acl = 'public-read'
     end
-
-    headers_t['x-amz-acl'] = acl
+    req_headers['x-amz-acl'] = acl
+    local headers_t = self:generate_auth_headers("PUT", destination, req_headers)
 
     local httpc = http.new()
     local res, err = httpc:request_uri(url, {
@@ -117,7 +128,18 @@ function _M.create_bucket(self, bucket, acl)
       ngx.log(ngx.ERR, "failed to create_bucket: ", destination, ": ", err)
       return
     end
-    return "Create bucket Sucess."
+
+    if res.status == 409 then
+        ngx.status = 409
+        ngx.header["Content-Type"] = "text/plain"
+        return "Bucket Already Exists."
+    end
+    if res.status == 200 then
+        ngx.status = 200
+        ngx.header["Content-Type"] = "text/plain"
+        return "Create Bucket Sucessfully."
+    end
+    return 
 
 
 end
@@ -137,30 +159,29 @@ function _M.del_bucket(self, bucket)
       ngx.log(ngx.ERR, "failed to del_bucket: ", destination, ": ", err)
       return
     end
-    if res.status ==204 then
+
+    if res.status == 204 then
         ngx.status = 204
-        ngx.header["Content-Type"] = "text/plain"
-        ngx.say(res.body)
     end
 
     if res.status == 404 then
         ngx.status = 404
         ngx.header["Content-Type"] = "text/plain"
-        ngx.say("Opps, bucket not found.")
+        ngx.say("Opps, Bucket not found.")
         ngx.exit(404)
     end
     
 end
 
 function _M.get_all_objs(self, bucket, args)
+    args = args or ''
     local destination = "/" .. bucket
-    local url = self.base_url .. destination
-    -- local headers_t = self:generate_auth_headers("GET", destination)
+    local url = self.base_url .. destination .. "?" .. args
+    local headers_t = self:generate_auth_headers("GET", destination)
 
     local httpc = http.new()
     local res, err = httpc:request_uri(url, {
                 method  = "GET",
-                body = args,
                 headers = headers_t
             })
     if not res then
@@ -186,7 +207,7 @@ function _M.get_buckets_location(self, bucket)
                 headers = headers_t
             })
     if not res then
-      ngx.log(ngx.ERR, "failed to get_all_buckets: ", destination, ": ", err)
+      ngx.log(ngx.ERR, "failed to get_buckets_location: ", destination, ": ", err)
       return
     end
     return res.body
@@ -204,7 +225,25 @@ function _M.get_buckets_acl(self, bucket)
                 headers = headers_t
             })
     if not res then
-      ngx.log(ngx.ERR, "failed to get_all_buckets: ", destination, ": ", err)
+      ngx.log(ngx.ERR, "failed to get_buckets_acl: ", destination, ": ", err)
+      return
+    end
+    return res.body
+end
+
+function _M.set_buckets_acl(self, bucket)
+    local destination = "/" .. bucket .. "?acl"
+    local url = self.base_url .. destination
+    local headers_t = self:generate_auth_headers("PUT", destination)
+
+    local httpc = http.new()
+    local res, err = httpc:request_uri(url, {
+                method  = "PUT",
+                -- body = content,
+                headers = headers_t
+            })
+    if not res then
+      ngx.log(ngx.ERR, "failed to set_buckets_acl: ", destination, ": ", err)
       return
     end
     return res.body
@@ -214,10 +253,15 @@ end
 
 -- OBJECT OPERATIONS
 
-function _M.create_obj(self, bucket, file, content)
-    local destination = "/" .. bucket .. "/" .. file
+function _M.create_obj(self, bucket, object, content)
+    local destination = "/" .. bucket .. "/" .. object
     local url = self.base_url .. destination
-    local headers_t = self:generate_auth_headers("PUT", destination)
+    local req_headers = ngx.req.get_headers()
+    if acl == nil then
+        acl = 'public-read'
+    end
+    req_headers['x-amz-acl'] = acl
+    local headers_t = self:generate_auth_headers("PUT", destination, req_headers)
 
     local httpc = http.new()
     local res, err = httpc:request_uri(url, {
@@ -229,11 +273,17 @@ function _M.create_obj(self, bucket, file, content)
       ngx.log(ngx.ERR, "failed to create_obj: ", destination, ": ", err)
       return
     end
-    return ngx.var.host .. destination
+    ngx.log(ngx.INFO, res.status)
+    if res.status == 200 then
+        ngx.status = 200
+        ngx.header["Content-Type"] = "text/plain"
+        return "Create Object Sucessfully."
+    end
+    return 'hhhh'
 end
 
-function _M.del_obj(self, bucket, file)
-    local destination = "/" .. bucket .. "/" .. file
+function _M.del_obj(self, bucket, object)
+    local destination = "/" .. bucket .. "/" .. object
     local url = self.base_url .. destination
     local headers_t = self:generate_auth_headers("DELETE", destination)
     local httpc = http.new()
@@ -249,13 +299,12 @@ function _M.del_obj(self, bucket, file)
 
     if res.status ==204 then
         ngx.status = 204
-        ngx.header["Content-Type"] = "text/plain"
-        ngx.say(res.body)
     end
+    return "Delete Object Sucessfully."
 end
 
-function _M.get_obj(self, bucket, file)
-    local destination = "/" .. bucket .. "/" .. file
+function _M.get_obj(self, bucket, object)
+    local destination = "/" .. bucket .. "/" .. object
     local url = self.base_url .. destination
     local headers_t = self:generate_auth_headers("GET", destination)
 
@@ -272,14 +321,14 @@ function _M.get_obj(self, bucket, file)
     if res.status == 404 then
         ngx.status = 404
         ngx.header["Content-Type"] = "text/plain"
-        ngx.say("Opps, file not found.")
+        ngx.say("Opps, object is not found.")
         ngx.exit(404)
     end
     return res.body
 end
 
-function _M.check_for_existance(self, bucket, file)
-    local destination = "/" .. bucket .. "/" .. file
+function _M.check_for_existance(self, bucket, object)
+    local destination = "/" .. bucket .. "/" .. object
     local url = self.base_url .. destination
     local headers_t = self:generate_auth_headers("HEAD", destination)
 
@@ -302,8 +351,8 @@ function _M.check_for_existance(self, bucket, file)
 end
 
 
-function _M.get_obj_acl(self, bucket, file)
-    local destination = "/" .. bucket .. "/" .. file .. "?acl"
+function _M.get_obj_acl(self, bucket, object)
+    local destination = "/" .. bucket .. "/" .. object .. "?acl"
     local url = self.base_url .. destination
     local headers_t = self:generate_auth_headers("GET", destination)
 
@@ -320,8 +369,8 @@ function _M.get_obj_acl(self, bucket, file)
     return res.body
 end
 
-function _M.set_obj_acl(self, bucket, file, args)
-    local destination = "/" .. bucket .. "/" .. file .. "?acl"
+function _M.set_obj_acl(self, bucket, object, args)
+    local destination = "/" .. bucket .. "/" .. object .. "?acl"
     local url = self.base_url .. destination
     local headers_t = self:generate_auth_headers("PUT", destination)
 
