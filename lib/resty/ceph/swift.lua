@@ -3,7 +3,7 @@
 -- @Date    : 2016-05-31 16:35:41
 -- @Author  : Linsir (root@linsir.org)
 -- @Link    : http://linsir.org
--- @Version : 0.0.2
+-- @Version : 0.0.3
 
 
 local http = require"resty.http"
@@ -16,7 +16,7 @@ end
 
 
 local _M = new_tab(0, 155)
-_M._VERSION = '0.0.2'
+_M._VERSION = '0.0.3'
 
 
 local mt = { __index = _M }
