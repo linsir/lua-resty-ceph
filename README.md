@@ -29,7 +29,7 @@ More:
 ## Synopsis
 
 ``` lua
-local cephs3 = require("resty.cephs3")
+local cephs3 = require("resty.ceph.s3")
 local app = cephs3:new(config.access_key, config.secret_key, config.host)
 
 local data = app:create_bucket(bucket)
@@ -50,7 +50,7 @@ app:get_all_objs(bucket)
 
 ## create_bucket
 
-    app:create_bucket(bucket)
+    app:create_bucket(bucket, acl)
 
 ## del_bucket
 
@@ -63,6 +63,7 @@ app:get_all_objs(bucket)
 ## get_all_objs
 
     app:get_all_objs(bucket)
+    app:get_all_objs(bucket, 'marker=3&max-keys=25')
 
 ## get_buckets_location
 
@@ -98,8 +99,8 @@ app:get_all_objs(bucket)
 
 # TODO
 
-* Some no required request headers for API.
 * Upload operations.
+* Simpe wrapper based on  **Lua-rados** <https://github.com/noahdesu/lua-rados>.
 
 # Author
 

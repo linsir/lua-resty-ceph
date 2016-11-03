@@ -111,7 +111,7 @@ end
 function _M.create_bucket(self, bucket, acl)
     local destination = "/" .. bucket
     local url = self.base_url .. destination
-    local req_headers = ngx.req.get_headers()
+    local req_headers = {}
     if acl == nil then
         acl = 'public-read'
     end
